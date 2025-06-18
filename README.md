@@ -31,3 +31,22 @@ runtimeOnly   'io.jsonwebtoken:jjwt-jackson:0.11.5'
 - JWT 페이로드(JSON)를 Jackson 라이브러리로 직렬화 및 역직렬화하기 위한 바인딩 모듈을 런타임에만 포함한다.
   - `Claims` 객체를 JSON으로 바꾸거나 JSON 문자열을 `Claims`로 변환할 때 Jackson 애너테이션과 mapper 설정을 제공한다.
 - 애플리케이션에 Jackson이 있을 때, 자동으로 JSON 처리 로직이 동작해 주어, API와 구현체 모듈만으로는 처리할 수 없는 JSON 바인딩 기능을 추가한다.
+
+# 패키지 구조
+```text
+src/main/java/com/example/jwtdemo
+├── JwtDemoApplication.java
+├── config
+│   └── SecurityConfig.java
+├── domain
+│   └── User.java
+├── repository
+│   └── UserRepository.java
+├── security
+│   ├── JwtTokenProvider.java
+│   └── JwtAuthenticationFilter.java
+├── service
+│   └── UserService.java
+└── web
+    └── AuthController.java
+```
