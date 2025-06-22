@@ -544,3 +544,25 @@ public class AuthResponseDto {
 ```json
 { "token": "<JWT>" }
 ```
+- - -
+# 7. 전체 흐름
+## 7.1 회원가입(Sign-up)
+- 클라이언트가 `/auth/signup` 요청을 보냄
+- `AuthController.signup()`에서 `UserService.register()` 호출 → `UserRepository`를 통해 DB에 신규 사용자 저장 → 201 Created 응답 반환. 
+
+## 7.2 로그인(Login)
+- 클라이언트가 `/auth/login` 요청(이메일, 비밀번호) 전송.
+- `AuthController.login()`에서 `AuthenticationManager.authenticate()` 실행 → `UserService.loadUserByUsername()`로 사용자 로드 및 `BCryptPasswordEncoder`로 비밀번호 검증.
+- 인증 성공 시 `JwtTokenProvider.generateToken()` 호출 → 이메일을 Subject로 설정하고 HS256 알고리즘으로 서명한 JWT 생성 → `AuthResponseDto`에 토큰을 담아 반환.
+
+## 7.3 요청 필터링 및 인증 컨텍스트 설정
+- 클라이언트가 보호된 API에 접근할 때마다 HTTP 헤더 `Authorization: Bearer <JWT>` 포함.
+- `JwtAuthenticationFilter.doFilterInternal()`이 모든 요청에 실행됨:
+  - 헤더에서 `Bearer` 토큰 추출
+  - `JwtTokenProvider.validateToken()`로 서명 및 만료 검증
+  - 유효한 토큰일 경우 `JwtTokenProvider.getAuthentication()` 호출 → `UsernamePasswordAuthenticationToken` 생성
+  - `SecurityContextHolder`에 인증 정보 저장 → 이후 컨트롤러에서 `@AuthenticationPrincipal` 등으로 사용자 정보 사용 가능
+## 7.4 보호된 리소스 처리
+- `SecurityConfig`의 설정에 따라 `/auth/**` 외 모든 요청은 인증 필요.
+- `SecurityContextHolder`에 인증된 사용자가 존재하면, 해당 권한(ROLE_USER)으로 컨트롤러 메서드 실행.
+- 인증 정보가 없거나 토큰이 유효하지 않으면 401 Unauthorized 응답 발생.
