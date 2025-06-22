@@ -1,5 +1,7 @@
 package com.example.jwt_demo.controller;
 
+import com.example.jwt_demo.dto.AuthRequestDto;
+import com.example.jwt_demo.dto.AuthResponseDto;
 import com.example.jwt_demo.security.JwtTokenProvider;
 import com.example.jwt_demo.service.UserService;
 import lombok.*;
@@ -18,30 +20,18 @@ public class AuthController {
 
     /** 회원가입(Sign-up) */
     @PostMapping("/signup")
-    public ResponseEntity<Void> signup(@RequestBody AuthRequest req) {
+    public ResponseEntity<Void> signup(@RequestBody AuthRequestDto req) {
         userService.register(req.getEmail(), req.getPassword());
         return ResponseEntity.status(HttpStatus.CREATED).build();
     }
 
     /** 로그인(Login) */
     @PostMapping("/login")
-    public ResponseEntity<AuthResponse> login(@RequestBody AuthRequest req) {
+    public ResponseEntity<AuthResponseDto> login(@RequestBody AuthRequestDto req) {
         Authentication auth = authManager.authenticate(
                 new UsernamePasswordAuthenticationToken(req.getEmail(), req.getPassword())
         );
         String token = jwtProvider.generateToken(req.getEmail());
-        return ResponseEntity.ok(new AuthResponse(token));
-    }
-
-    @Data
-    static class AuthRequest {
-        private String email;
-        private String password;
-    }
-
-    @Data
-    @AllArgsConstructor
-    static class AuthResponse {
-        private String token;
+        return ResponseEntity.ok(new AuthResponseDto(token));
     }
 }
