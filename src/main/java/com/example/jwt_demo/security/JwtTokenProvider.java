@@ -21,8 +21,12 @@ public class JwtTokenProvider {
     @Value("${jwt.secret}")
     private String secretKey;
 
-    @Value("${jwt.expiration-ms}")
-    private long validityInMilliseconds;
+    // 엑세스 토큰 및 리프레시 토큰 만료 시간
+    @Value("${jwt.access-token.expiration-ms}")
+    private long accessTokenValidityMs;
+
+    @Value("${jwt.refresh-token.expiration-ms}")
+    private long refreshTokenValidityMs;
 
     @PostConstruct
     protected void init() {
@@ -30,11 +34,20 @@ public class JwtTokenProvider {
         secretKey = Base64.getEncoder().encodeToString(secretKey.getBytes());
     }
 
+    // 액세스 토큰 생성
+    public String generateAccessToken(String email) {
+        return generateToken(email, accessTokenValidityMs);
+    }
+
+    public String generateRefreshToken(String email) {
+        return generateToken(email, refreshTokenValidityMs);
+    }
+
     // 사용자 이름(email)으로 JWT 생성
-    public String generateToken(String email) {
+    public String generateToken(String email, long validityMs) {
         Claims claims = Jwts.claims().setSubject(email);
         Date now = new Date();
-        Date expiryDate = new Date(now.getTime() + validityInMilliseconds);
+        Date expiryDate = new Date(now.getTime() + validityMs);
 
         return Jwts.builder()
                    .setClaims(claims)
