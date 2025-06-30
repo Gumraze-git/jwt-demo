@@ -48,6 +48,10 @@ spring.datasource.url=jdbc:mysql://localhost:3306/jwt_demo?useSSL=false&serverTi
 spring.datasource.username=jwt_user
 spring.datasource.password=1234
 
+# DB가 MySQL을 사용했다는 것을 명시(선택)
+spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
+spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.MySQL8Dialect
+
 # JPA/Hibernate 설정
 # 애플리케이션 시작 시 엔티티와 스키마를 비교하여 자동으로 반영함.
 spring.jpa.hibernate.ddl-auto=update
@@ -58,6 +62,10 @@ spring.jpa.properties.hibernate.format_sql=true
 
 # JWT 서명에 사용할 비밀키
 jwt.secret = pW3f7nKL4uTaBv5QsFgYtRu6Zx9e1nKcLxPmGwHcRp3JtLkYzVcBaSpZrWqTxYhU
+
+# JWT 토큰 만료 시간 설정
+jwt.access-token.expiration-ms=3600000
+jwt.refresh-token.expiration-ms=1209600000
 ```
 - JWT 서명에 사용되는 비밀 키는 실제 배포에는 `application.properties`에 포함되면 안된다.
 
@@ -121,7 +129,7 @@ mysql -u root -p
 CREATE DATABASE jwt_demo;
 
 -- 2. 전용 사용자 생성 및 최소 권한 부여
-CREATE USER 'jwt_user'@'localhost' IDENTIFIED BY '1234';
+CREATE USER 'jwt_demo'@'localhost' IDENTIFIED BY '1234';
 GRANT ALL ON jwt_demo.* TO 'jwt_user'@'localhost';
 ```
 
@@ -206,6 +214,27 @@ public class User {
 }
 ```
 
+### 5.1.2 RefreshToken
+```java
+@Entity
+@Getter @Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+@Table(name = "refresh_tokens")
+public class RefreshToken {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false, unique = true)
+    private String email;
+
+    @Column(nullable = false)
+    private String token;
+}
+```
+
 - - -
 ## 5.2 Repository
 ### 5.2.1 UserRepository
@@ -235,7 +264,16 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
 - 메서드
   - `findByEmail`과 `existByEmail` 메서드는 회원가입과 인증 과정에서 이메일을 기준으로 사용자를 조회 및 검증하는데 사용된다.
-  
+
+### 5.2.1 RefreshTokenRepository
+```java
+public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long> {
+    Optional<RefreshToken> findByEmail(String email);
+    Optional<RefreshToken> findByToken(String token);
+    void deleteByEmail(String email);
+}
+```
+
 - - -
 ## 5.3 Service
 ### 5.3.1 UserService
@@ -243,39 +281,69 @@ public interface UserRepository extends JpaRepository<User, Long> {
 @Service // 스프링 컨테이너에 이 클래스를 서비스 빈(Service Bean)으로 등록함.
 @RequiredArgsConstructor // final 필드를 파라미터로 받는 생성자를 자동으로 생성함.
 public class UserService implements UserDetailsService {
-    private final UserRepository userRepository;
-    private final BCryptPasswordEncoder passwordEncoder;
+  private final UserRepository userRepository;
+  private final PasswordEncoder passwordEncoder;
+  private final RefreshTokenRepository refreshTokenRepository;
 
-    // 회원 가입 처리
-    @Transactional
-    public User register(String email, String password) {
-        // 이메일 중복 체크
-        if (userRepository.existsByEmail(email)) {
-            throw new IllegalArgumentException("[에러] 이미 사용 중인 이메일입니다.");
-        }
-        // 비밀번호 암호화
-        String encoded = passwordEncoder.encode(password);
-        User user = User.builder()
-                        .email(email)
-                        .password(encoded)
-                        .build();
-        
-        // 암호화된 비밀번호 저장
-        return userRepository.save(user);
+  // 회원가입 처리
+  @Transactional
+  public User register(String email, String password) {
+    // 이메일 중복 체크
+    if (userRepository.existsByEmail(email)) {
+      throw new IllegalArgumentException("[에러] 이미 사용 중인 이메일입니다.");
     }
+    // 비밀번호 암호화
+    String encoded = passwordEncoder.encode(password);
+    User user = User.builder()
+            .email(email)
+            .password(encoded)
+            .build();
 
-    // Spring Security 인증을 위한 사용자 정보 로드
-    @Override
-    public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new UsernameNotFoundException("[에러] 등록되지 않은 이메일입니다."));
+    // 암호화된 비밀번호 저장
+    return userRepository.save(user);
+  }
 
-        return org.springframework.security.core.userdetails.User.builder()
-                .username(user.getEmail())
-                .password(user.getPassword())
-                .roles("USER")
-                .build();
-    }
+  // Spring Security 인증을 위한 사용자 정보 로드
+  @Override
+  public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
+    User user = userRepository.findByEmail(email)
+            .orElseThrow(() -> new UsernameNotFoundException("[에러] 등록되지 않은 이메일입니다."));
+
+    return org.springframework.security.core.userdetails.User.builder()
+            .username(user.getEmail())
+            .password(user.getPassword())
+            .roles("USER")
+            .build();
+  }
+
+  // 로그인 시 RefreshToken 저장 또는 갱신
+  @Transactional
+  public void saveRefreshToken(String email, String token) {
+    RefreshToken refreshToken = refreshTokenRepository.findByEmail(email)
+            .map(rt -> {
+              rt.setToken(token);
+              return rt;
+            })
+            .orElse(RefreshToken.builder()
+                    .email(email)
+                    .token(token)
+                    .build());
+    refreshTokenRepository.save(refreshToken);
+  }
+
+  // 유효한 refresh token인지 확인하고 이메일을 반환
+  @Transactional
+  public String validateRefreshToken(String token) {
+    return refreshTokenRepository.findByToken(token)
+            .map(RefreshToken::getEmail)
+            .orElseThrow(() -> new RuntimeException("[에러] 유효하지 않은 Refresh Token입니다."));
+  }
+
+  // 로그아웃 또는 재발급 시 기존 refresh token 삭제
+  @Transactional
+  public void deleteRefreshToken(String email) {
+    refreshTokenRepository.deleteByEmail(email);
+  }
 }
 ```
 - `UserDetailService`: Spring Security의 인증 처리 인터페이스로 `loadUserByUsername` 메서드로 로그인 프로세스 중 사용자 정보를 가져오는 역할을 한다.
@@ -479,21 +547,44 @@ public class AuthController {
   private final JwtTokenProvider jwtProvider;
   private final UserService userService;
 
-  /** 회원가입(Sign-up) */
+  // 회원가입(Sign-up)
   @PostMapping("/signup")
   public ResponseEntity<Void> signup(@RequestBody AuthRequestDto req) {
     userService.register(req.getEmail(), req.getPassword());
     return ResponseEntity.status(HttpStatus.CREATED).build();
   }
 
-  /** 로그인(Login) */
+  // 로그인(Login)
   @PostMapping("/login")
   public ResponseEntity<AuthResponseDto> login(@RequestBody AuthRequestDto req) {
     Authentication auth = authManager.authenticate(
             new UsernamePasswordAuthenticationToken(req.getEmail(), req.getPassword())
     );
-    String token = jwtProvider.generateToken(req.getEmail());
-    return ResponseEntity.ok(new AuthResponseDto(token));
+
+    String accessToken = jwtProvider.generateAccessToken(req.getEmail());
+    String refreshToken = jwtProvider.generateRefreshToken(req.getEmail());
+
+    userService.saveRefreshToken(req.getEmail(), refreshToken);
+
+    return ResponseEntity.ok(new AuthResponseDto(accessToken, refreshToken));
+  }
+
+  // refresh API 추가
+  @PostMapping("/refresh")
+  public ResponseEntity<AuthResponseDto> refresh(@RequestBody Map<String, String> request) {
+    String refreshToken = request.get("refreshToken");
+
+    if (!jwtProvider.validateToken(refreshToken)) {
+      return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+    }
+
+    String email = userService.validateRefreshToken(refreshToken);
+    String newAccessToken = jwtProvider.generateAccessToken(email);
+    String newRefreshToken = jwtProvider.generateRefreshToken(email);
+
+    userService.saveRefreshToken(email, newRefreshToken);
+
+    return ResponseEntity.ok(new AuthResponseDto(newAccessToken, newRefreshToken));
   }
 }
 ```
@@ -502,10 +593,6 @@ public class AuthController {
 데이터 전송 객체 생성
 ### 5.7.1 AuthRequestDto
 ```java
-package com.example.jwt_demo.dto;
-
-import lombok.Data;
-
 @Data
 public class AuthRequestDto {
     private String email;
@@ -514,15 +601,11 @@ public class AuthRequestDto {
 ```
 ### 5.7.2 AuthResponseDto
 ```java
-package com.example.jwt_demo.dto;
-
-import lombok.AllArgsConstructor;
-import lombok.Data;
-
 @Data
 @AllArgsConstructor
 public class AuthResponseDto {
-    private String token;
+  private String accessToken;
+  private String refreshToken;
 }
 
 ```
@@ -544,6 +627,23 @@ public class AuthResponseDto {
 ```json
 { "token": "<JWT>" }
 ```
+
+## 6.3 Refresh Token 재발급
+- 요청: POST /auth/refresh
+```json
+{
+  "refreshToken": "my-refresh-token"
+}
+```
+
+- 응답
+```json
+{
+  "accessToken": "<new-access-token>",
+  "refreshToken": "<new-refresh-token>"
+}
+```
+
 - - -
 # 7. 전체 흐름
 ## 7.1 회원가입(Sign-up)
@@ -562,7 +662,14 @@ public class AuthResponseDto {
   - `JwtTokenProvider.validateToken()`로 서명 및 만료 검증
   - 유효한 토큰일 경우 `JwtTokenProvider.getAuthentication()` 호출 → `UsernamePasswordAuthenticationToken` 생성
   - `SecurityContextHolder`에 인증 정보 저장 → 이후 컨트롤러에서 `@AuthenticationPrincipal` 등으로 사용자 정보 사용 가능
+
 ## 7.4 보호된 리소스 처리
 - `SecurityConfig`의 설정에 따라 `/auth/**` 외 모든 요청은 인증 필요.
 - `SecurityContextHolder`에 인증된 사용자가 존재하면, 해당 권한(ROLE_USER)으로 컨트롤러 메서드 실행.
 - 인증 정보가 없거나 토큰이 유효하지 않으면 401 Unauthorized 응답 발생.
+
+## 7.5 토큰 재발급(Refresh)
+- `accessToken`이 만료되었을 경우, 클라이언트는 저장된 `refreshToken`을 `/auth/refresh` API로 전달한다.
+- 서버는 `refreshToken`의 유효성을 검증하고 DB에 저장된 토큰과 일치 여부를 확인한 뒤,
+- 새로운 `accessToken`과 `refreshToken`을 생성하여 응답한다.
+- 클라이언트는 응답 받은 토큰을 이용하여 이후 요청을 이어간다.
