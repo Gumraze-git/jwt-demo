@@ -673,3 +673,112 @@ public class AuthResponseDto {
 - 서버는 `refreshToken`의 유효성을 검증하고 DB에 저장된 토큰과 일치 여부를 확인한 뒤,
 - 새로운 `accessToken`과 `refreshToken`을 생성하여 응답한다.
 - 클라이언트는 응답 받은 토큰을 이용하여 이후 요청을 이어간다.
+
+- - -
+# 8. 개념 설명
+## 8.1 JWT 개요
+### 8.1.1 JWT?
+- JWT는 JSON Web Token의 약자로, 사용자 인증(Authentication) 및 정보 전달에 사용되는 토큰 기반의 인증 방식이다.
+- 클라이언트와 서버 사이의 안전한 정보 전달을 위해 `Base64Url`로 인코딩된 JSON 객체를 사용한다.
+
+### 8.1.2 왜 JWT를 사용하는가?
+#### 기존 세션 기반 인증 방식의 한계
+전통적인 웹 인증 방식은 서버 세션 기반으로 다음과 같은 형태를 가지고 있다.
+1. 사용자가 로그인하면 서버가 세션을 생성하고 세션 ID를 발급
+2. 세션 ID를 클라이언트가 쿠키로 저장하고, 이후 요청 시 함께 요청
+3. 서버는 요청마다 이 세션 ID를 확인하고 인증 여부를 판단함.
+
+**문제점**
+- 서버가 사용자별 세션 정보를 메모리 혹은 DB에 저장해야함.
+- 서버가 늘어날수록 세션 공유 또는 세션 저장소의 중앙화 필요함.
+- 수평 확장에 적합하지 않음(특히 클라우드, 마이크로서비스 환경)
+
+즉, 서버 관리에 많은 노력(비용)과 병목이 발생한다.
+
+#### JWT 기반 인증 방식
+- JWT는 이러한 문제를 해결하고자 다음과 같은 목표로 설계됨.
+  - 서버가 상태를 유지하지 않아도 됨(Stateless)
+  - 인증 정보를 클라이언트에게 토큰 형태로 위임
+  - 토큰만 있으면 어디서든 인증이 가능함.
+
+**문제점**
+- 토큰이 도난당하면 사용자의 정보를 누구나 사용할 수 있게됨
+  - https 등의 보안 강화가 필요함.
+- 만료 시간 이전에 권한 변경이 어려우며, 만료가 되지 않은 토큰을 취소할 방법이 복잡함.
+  - 도난 토큰의 블랙리스트가 필요함.
+
+## 8.2 JWT 구조
+JWT는 다음과 같이 세 부분으로 구성되어 있다.
+
+```text
+Header.Payload.Signature
+```
+
+**구성요소**
+- `Header`: 토큰 타입과 서명 알고리즘
+- `Payload`: 전달할 클레임(사용자 정보)
+- `Signature`: 비밀 키를 이용해 서명한 값, 위조 방지 목적
+
+## 8.3 JWT 사용 흐름
+1. 사용자 로그인
+2. 서버는 로그인 성공 시, **Access Token과 Refresh Token** 발급함.
+3. 클라이언트(사용자)는 Access Token을 헤더(Authorization: Bearer<token>)에 포함시켜 요청
+4. 서버는 토큰 검증 후 요청 처리
+5. Access Token이 만료되면, Refresh Token으로 재발급 요청
+6. 서버는 Refresh Token 검증 후 새로운 Access Token 발급
+
+## 8.4 Access Token vs Refresh Token
+|구분|Access Token| Refresh Token|
+|---|---|---|
+|목적| API 접근 허용| Access Token 재발급|
+|유효기간| 짧음(n분)| 김(n day)|
+|저장 위치| 브라우저 메모리, HttpOnly 쿠키| HttpOnly 쿠키 또는 서버|
+|노출 위험| 비교적 높음| 보안이 더 중요함|
+
+## 8.5 동작 예시
+
+### 8.5.1 입력
+사용자가 인증 요청(로그인)을 서버에 다음과 같은 데이터를 보냄.
+
+```text
+POST /auth/login
+Content-Type: application/json
+
+{
+  "email": "user@example.com",
+  "password": "mypassword123"
+}
+```
+- 입력 항목
+  - `email`: 사용자의 고유 이메일 주소
+  - `password`: 해당 이메일에 해당하는 비밀번호
+
+### 8.5.2 처리 과정
+|순서|단계| 설명                            |
+|--|--|-------------------------------|
+|1|사용자 조회| 입력받은 이메일로 사용자 존재 여부 확인(DB) 조회 |
+|2|비밀번호 검증| 입력된 비밀번호와 DB에 저장된 해시 비교|
+|3| 유효성 판단| 비밀번호 일치하면 인증 성공, 아니면 실패 응답|
+|4|JWT Payload 구성| 사용자 ID, 이메일, 권한, 발급 시간 등 포함|
+|5| 토큰 서명 및 생성| accessToken, refreshToken 각각 서명 후 발급|
+|6| 응답 반환| 생성된 토큰을 클라이언트에 반환|
+
+**JWT Payload 예시**
+```json
+{
+  "sub": "user_id_123",
+  "email": "user@example.com",
+  "role": "user",
+  "iat": 1722350000,
+  "exp": 172235360
+}
+```
+### 8.5.3 출력
+서버가 클라이언트에게 JWT를 반환함.
+
+```json
+{
+  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
