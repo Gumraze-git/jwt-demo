@@ -31,7 +31,7 @@ public class AuthController {
         return ResponseEntity.status(HttpStatus.CREATED).build();
     }
 
-    //로그인(Login)
+    // 로그인(Login)
     @PostMapping("/login")
     public ResponseEntity<AuthResponseDto> login(@RequestBody AuthRequestDto req) {
         Authentication auth = authManager.authenticate(
@@ -65,4 +65,14 @@ public class AuthController {
 
         return ResponseEntity.ok(new AuthResponseDto(newAccessToken, newRefreshToken));
     }
+
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout(@RequestBody Map<String, String> request) {
+    String refreshToken = request.get("refreshToken");
+    if (refreshToken != null && jwtProvider.validateToken(refreshToken)) {
+        String email = jwtProvider.getEmail(refreshToken);
+        userService.deleteRefreshToken(email);
+    }
+    return ResponseEntity.noContent().build();
+}
 }

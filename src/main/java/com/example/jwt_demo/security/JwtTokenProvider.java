@@ -64,7 +64,7 @@ public class JwtTokenProvider {
     }
 
     // 토큰에서 email 추출
-    private String getEmail(String token) {
+    public String getEmail(String token) {
         return Jwts.parser()
                    .setSigningKey(secretKey)
                    .parseClaimsJws(token)
